@@ -1,12 +1,22 @@
 import { ClerkProvider } from "@clerk/tanstack-react-start"
 import { shadcn } from "@clerk/ui/themes"
-import { HeadContent, Scripts, createRootRoute } from "@tanstack/react-router"
+import type { QueryClient } from "@tanstack/react-query"
+import {
+  HeadContent,
+  Scripts,
+  createRootRouteWithContext,
+} from "@tanstack/react-router"
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools"
 import { TanStackDevtools } from "@tanstack/react-devtools"
 
+import { CartProvider } from "@/features/store/cart-context"
 import appCss from "../styles.css?url"
 
-export const Route = createRootRoute({
+type RouterContext = {
+  queryClient: QueryClient
+}
+
+export const Route = createRootRouteWithContext<RouterContext>()({
   head: () => ({
     meta: [
       {
@@ -17,7 +27,7 @@ export const Route = createRootRoute({
         content: "width=device-width, initial-scale=1",
       },
       {
-        title: "TanStack Start Starter",
+        title: "Wompi Commerce Demo",
       },
     ],
     links: [
@@ -43,7 +53,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        <ClerkProvider appearance={{ theme: shadcn }}>{children}</ClerkProvider>
+        <ClerkProvider appearance={{ theme: shadcn }}>
+          <CartProvider>{children}</CartProvider>
+        </ClerkProvider>
         <TanStackDevtools
           config={{
             position: "bottom-right",
