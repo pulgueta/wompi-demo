@@ -12,8 +12,13 @@ export function ProductCard({ product }: { product: Product }) {
     actions,
   } = useCart()
   const quantity = quantities[product.id] ?? 0
+  const isOutOfStock = product.inventory <= 0
 
   async function buyNow() {
+    if (isOutOfStock) {
+      return
+    }
+
     if (quantity === 0) {
       actions.addItem(product.id)
     }
@@ -24,7 +29,7 @@ export function ProductCard({ product }: { product: Product }) {
     <article className="overflow-hidden rounded-xl border bg-card">
       <img
         src={product.imagePath}
-        alt=""
+        alt={product.name}
         className="h-52 w-full bg-muted object-cover"
       />
       <div className="space-y-4 p-5">
@@ -48,9 +53,10 @@ export function ProductCard({ product }: { product: Product }) {
               <Button
                 type="button"
                 variant="outline"
+                disabled={isOutOfStock}
                 onClick={() => actions.addItem(product.id)}
               >
-                Agregar
+                {isOutOfStock ? "Agotado" : "Agregar"}
               </Button>
             ) : (
               <div className="flex items-center rounded-md border">
@@ -79,8 +85,13 @@ export function ProductCard({ product }: { product: Product }) {
               </div>
             )}
           </div>
-          <Button type="button" className="w-full" onClick={buyNow}>
-            Comprar ahora
+          <Button
+            type="button"
+            className="w-full"
+            disabled={isOutOfStock}
+            onClick={buyNow}
+          >
+            {isOutOfStock ? "Sin stock" : "Comprar ahora"}
           </Button>
         </div>
       </div>

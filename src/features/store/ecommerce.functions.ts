@@ -62,7 +62,11 @@ export const createWompiCheckout = createServerFn({ method: "POST" })
     setPrivateResponseHeaders()
 
     const request = getRequest()
-    const redirectUrl = new URL("/orders", request.url)
+    const appOrigin =
+      process.env.PUBLIC_APP_URL ??
+      process.env.APP_URL ??
+      new URL(request.url).origin
+    const redirectUrl = new URL("/orders", appOrigin)
     redirectUrl.searchParams.set("checkout", "complete")
 
     return await createCheckout({

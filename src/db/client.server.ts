@@ -54,7 +54,10 @@ const mockProducts = [
 let bootstrapPromise: Promise<void> | undefined
 
 export function ensureDatabaseReady() {
-  bootstrapPromise ??= bootstrapDatabase()
+  bootstrapPromise ??= bootstrapDatabase().catch((error) => {
+    bootstrapPromise = undefined
+    throw error
+  })
   return bootstrapPromise
 }
 

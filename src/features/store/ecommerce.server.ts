@@ -200,38 +200,40 @@ export async function createCheckout(
       },
     })
 
-    await db.insert(checkoutSessions).values({
-      id: checkoutSessionId,
-      userId: currentUser.id,
-      amountInCents,
-      currency: "COP",
-      customerEmail: input.customerEmail,
-      customerName: input.customerName,
-      customerPhone: input.customerPhone,
-      legalIdType: input.legalIdType,
-      legalId: input.legalId,
-      shippingAddressLine1: input.shippingAddressLine1,
-      shippingAddressLine2: input.shippingAddressLine2 ?? null,
-      shippingCity: input.shippingCity,
-      shippingRegion: input.shippingRegion,
-      shippingPostalCode: input.shippingPostalCode ?? null,
-      wompiReference,
-      wompiCheckoutUrl: checkoutUrl,
-      createdAt: now,
-      updatedAt: now,
-    })
-
-    await db.insert(checkoutSessionItems).values(
-      orderLines.map((line) => ({
-        id: randomUUID(),
-        checkoutSessionId,
-        productId: line.product.id,
-        productName: line.product.name,
-        unitPriceInCents: line.product.priceInCents,
-        quantity: line.quantity,
+    await db.transaction(async (tx) => {
+      await tx.insert(checkoutSessions).values({
+        id: checkoutSessionId,
+        userId: currentUser.id,
+        amountInCents,
+        currency: "COP",
+        customerEmail: input.customerEmail,
+        customerName: input.customerName,
+        customerPhone: input.customerPhone,
+        legalIdType: input.legalIdType,
+        legalId: input.legalId,
+        shippingAddressLine1: input.shippingAddressLine1,
+        shippingAddressLine2: input.shippingAddressLine2 ?? null,
+        shippingCity: input.shippingCity,
+        shippingRegion: input.shippingRegion,
+        shippingPostalCode: input.shippingPostalCode ?? null,
+        wompiReference,
+        wompiCheckoutUrl: checkoutUrl,
         createdAt: now,
-      }))
-    )
+        updatedAt: now,
+      })
+
+      await tx.insert(checkoutSessionItems).values(
+        orderLines.map((line) => ({
+          id: randomUUID(),
+          checkoutSessionId,
+          productId: line.product.id,
+          productName: line.product.name,
+          unitPriceInCents: line.product.priceInCents,
+          quantity: line.quantity,
+          createdAt: now,
+        }))
+      )
+    })
 
     return {
       checkoutUrl,
@@ -334,54 +336,70 @@ export async function processWompiWebhook(rawBody: string) {
   }
 
   const orderId = randomUUID()
-  await db.insert(orders).values({
-    id: orderId,
-    userId: checkoutSession.userId,
-    status,
-    amountInCents: transaction.amount_in_cents ?? checkoutSession.amountInCents,
-    currency: transaction.currency ?? "COP",
-    customerEmail: transaction.customer_email ?? checkoutSession.customerEmail,
-    customerName: checkoutSession.customerName,
-    customerPhone: checkoutSession.customerPhone,
-    legalIdType: checkoutSession.legalIdType,
-    legalId: checkoutSession.legalId,
-    shippingAddressLine1:
-      transaction.shipping_address?.address_line_1 ??
-      checkoutSession.shippingAddressLine1,
-    shippingAddressLine2:
-      transaction.shipping_address?.address_line_2 ??
-      checkoutSession.shippingAddressLine2,
-    shippingCity:
-      transaction.shipping_address?.city ?? checkoutSession.shippingCity,
-    shippingRegion:
-      transaction.shipping_address?.region ?? checkoutSession.shippingRegion,
-    shippingPostalCode:
-      transaction.shipping_address?.postal_code ??
-      checkoutSession.shippingPostalCode,
-    wompiReference: transaction.reference,
-    wompiCheckoutUrl: checkoutSession.wompiCheckoutUrl,
-    wompiError: transaction.status_message ?? null,
-    wompiPaymentMethodType: transaction.payment_method_type ?? null,
-    wompiTransactionId: transaction.id,
-    createdAt: now,
-    updatedAt: now,
+
+  await db.transaction(async (tx) => {
+    const createdOrders = await tx
+      .insert(orders)
+      .values({
+        id: orderId,
+        userId: checkoutSession.userId,
+        status,
+        amountInCents:
+          transaction.amount_in_cents ?? checkoutSession.amountInCents,
+        currency: transaction.currency ?? "COP",
+        customerEmail:
+          transaction.customer_email ?? checkoutSession.customerEmail,
+        customerName: checkoutSession.customerName,
+        customerPhone: checkoutSession.customerPhone,
+        legalIdType: checkoutSession.legalIdType,
+        legalId: checkoutSession.legalId,
+        shippingAddressLine1:
+          transaction.shipping_address?.address_line_1 ??
+          checkoutSession.shippingAddressLine1,
+        shippingAddressLine2:
+          transaction.shipping_address?.address_line_2 ??
+          checkoutSession.shippingAddressLine2,
+        shippingCity:
+          transaction.shipping_address?.city ?? checkoutSession.shippingCity,
+        shippingRegion:
+          transaction.shipping_address?.region ??
+          checkoutSession.shippingRegion,
+        shippingPostalCode:
+          transaction.shipping_address?.postal_code ??
+          checkoutSession.shippingPostalCode,
+        wompiReference: transaction.reference,
+        wompiCheckoutUrl: checkoutSession.wompiCheckoutUrl,
+        wompiError: transaction.status_message ?? null,
+        wompiPaymentMethodType: transaction.payment_method_type ?? null,
+        wompiTransactionId: transaction.id,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing({ target: orders.wompiReference })
+      .returning({ id: orders.id })
+
+    if (createdOrders.length === 0) {
+      return
+    }
+
+    const createdOrder = createdOrders[0]
+
+    await tx.insert(orderItems).values(
+      checkoutSession.items.map((item) => ({
+        id: randomUUID(),
+        orderId: createdOrder.id,
+        productId: item.productId,
+        productName: item.productName,
+        unitPriceInCents: item.unitPriceInCents,
+        quantity: item.quantity,
+        createdAt: now,
+      }))
+    )
+
+    await tx
+      .delete(checkoutSessions)
+      .where(eq(checkoutSessions.id, checkoutSession.id))
   })
-
-  await db.insert(orderItems).values(
-    checkoutSession.items.map((item) => ({
-      id: randomUUID(),
-      orderId,
-      productId: item.productId,
-      productName: item.productName,
-      unitPriceInCents: item.unitPriceInCents,
-      quantity: item.quantity,
-      createdAt: now,
-    }))
-  )
-
-  await db
-    .delete(checkoutSessions)
-    .where(eq(checkoutSessions.id, checkoutSession.id))
 
   return {
     ok: true,
@@ -400,15 +418,30 @@ async function getCurrentUser(): Promise<StoreUser | null> {
     where: eq(users.clerkUserId, session.userId),
   })
 
-  const clerkUser = await clerkClient().users.getUser(session.userId)
-  const email =
-    clerkUser.primaryEmailAddress?.emailAddress ??
-    clerkUser.emailAddresses.at(0)?.emailAddress ??
-    `${session.userId}@example.invalid`
-  const nameFromParts = [clerkUser.firstName, clerkUser.lastName]
-    .filter(Boolean)
-    .join(" ")
-  const name = (clerkUser.fullName ?? nameFromParts) || "Demo customer"
+  let email =
+    existingUser?.email ?? `${session.userId}@example.invalid`
+  let name = existingUser?.name ?? "Demo customer"
+
+  try {
+    const clerkUser = await clerkClient().users.getUser(session.userId)
+    email =
+      clerkUser.primaryEmailAddress?.emailAddress ??
+      clerkUser.emailAddresses.at(0)?.emailAddress ??
+      email
+    const nameFromParts = [clerkUser.firstName, clerkUser.lastName]
+      .filter(Boolean)
+      .join(" ")
+    name = (clerkUser.fullName ?? nameFromParts) || name
+  } catch {
+    if (existingUser) {
+      return {
+        id: existingUser.id,
+        email: existingUser.email,
+        name: existingUser.name,
+      }
+    }
+  }
+
   const now = Date.now()
 
   if (existingUser) {
@@ -421,16 +454,23 @@ async function getCurrentUser(): Promise<StoreUser | null> {
   }
 
   const userId = randomUUID()
-  await db.insert(users).values({
-    id: userId,
-    clerkUserId: session.userId,
-    email,
-    name,
-    createdAt: now,
-    updatedAt: now,
-  })
+  const [upsertedUser] = await db
+    .insert(users)
+    .values({
+      id: userId,
+      clerkUserId: session.userId,
+      email,
+      name,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: users.clerkUserId,
+      set: { email, name, updatedAt: now },
+    })
+    .returning({ id: users.id, email: users.email, name: users.name })
 
-  return { id: userId, email, name }
+  return upsertedUser
 }
 
 async function listProducts() {
@@ -445,6 +485,7 @@ async function listRecentOrders(userId: string): Promise<RecentOrder[]> {
   const storeOrders = await db.query.orders.findMany({
     where: eq(orders.userId, userId),
     orderBy: desc(orders.createdAt),
+    limit: 20,
     with: {
       items: {
         columns: {

@@ -1,4 +1,4 @@
-import { createContext, use, useReducer } from "react"
+import { createContext, use, useMemo, useReducer } from "react"
 
 type CartState = {
   quantities: Record<string, number>
@@ -27,15 +27,20 @@ const CartContext = createContext<CartContextValue | null>(null)
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(cartReducer, { quantities: {} })
 
-  const actions: CartActions = {
-    addItem: (productId) => dispatch({ type: "addItem", productId }),
-    clearCart: () => dispatch({ type: "clearCart" }),
-    removeItem: (productId) => dispatch({ type: "removeItem", productId }),
-    setQuantity: (productId, quantity) =>
-      dispatch({ type: "setQuantity", productId, quantity }),
-  }
+  const actions = useMemo<CartActions>(
+    () => ({
+      addItem: (productId) => dispatch({ type: "addItem", productId }),
+      clearCart: () => dispatch({ type: "clearCart" }),
+      removeItem: (productId) => dispatch({ type: "removeItem", productId }),
+      setQuantity: (productId, quantity) =>
+        dispatch({ type: "setQuantity", productId, quantity }),
+    }),
+    []
+  )
 
-  return <CartContext value={{ state, actions }}>{children}</CartContext>
+  const value = useMemo(() => ({ state, actions }), [actions, state])
+
+  return <CartContext value={value}>{children}</CartContext>
 }
 
 export function useCart() {
