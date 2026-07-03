@@ -1,23 +1,26 @@
 import { useReducer, useTransition } from "react"
 import { Show, SignInButton, UserButton } from "@clerk/tanstack-react-start"
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query"
 import { createFileRoute, useRouter } from "@tanstack/react-router"
 import { useServerFn } from "@tanstack/react-start"
 
 import { Button } from "@/components/ui/button"
 import { CheckoutPanel } from "@/features/store/checkout-panel"
-import {
-  createWompiCheckout,
-  getStorefront,
-} from "@/features/store/ecommerce.functions"
+import { createWompiCheckout } from "@/features/store/ecommerce.functions"
 import type {
   CheckoutResult,
   StoreUser,
 } from "@/features/store/ecommerce.server"
 import { ProductGrid } from "@/features/store/product-grid"
 import { RecentOrders } from "@/features/store/recent-orders"
+import {
+  storefrontQueryKey,
+  storefrontQueryOptions,
+} from "@/features/store/storefront-query"
 
 export const Route = createFileRoute("/")({
-  loader: () => getStorefront(),
+  loader: ({ context }) =>
+    context.queryClient.ensureQueryData(storefrontQueryOptions),
   component: Storefront,
 })
 
@@ -38,9 +41,10 @@ type StorefrontAction =
   | { type: "checkoutError"; message: string }
 
 function Storefront() {
-  const { currentUser, products, recentOrders, wompiConfigured } =
-    Route.useLoaderData()
+  const { data } = useSuspenseQuery(storefrontQueryOptions)
+  const { currentUser, products, recentOrders, wompiConfigured } = data
   const router = useRouter()
+  const queryClient = useQueryClient()
   const createCheckoutFn = useServerFn(createWompiCheckout)
   const [state, dispatch] = useReducer(
     storefrontReducer,
@@ -78,7 +82,10 @@ function Storefront() {
           },
         })
         dispatch({ type: "checkoutSuccess", result })
-        await router.invalidate()
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: storefrontQueryKey }),
+          router.invalidate(),
+        ])
       } catch (error) {
         dispatch({
           type: "checkoutError",
