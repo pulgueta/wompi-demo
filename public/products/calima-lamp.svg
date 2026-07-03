@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 620" role="img" aria-labelledby="title desc">
+  <title id="title">Calima Desk Lamp</title>
+  <desc id="desc">A product-style illustration of a ceramic desk lamp.</desc>
+  <rect width="900" height="620" fill="#f5f7fb"/>
+  <rect x="88" y="74" width="724" height="472" rx="28" fill="#dde7f4"/>
+  <circle cx="598" cy="184" r="108" fill="#f0cf7b" opacity=".42"/>
+  <path d="M370 198h160l48 144H322z" fill="#fff4cd" stroke="#31465f" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M450 342v118" stroke="#31465f" stroke-width="18" stroke-linecap="round"/>
+  <path d="M370 486c18-42 142-42 160 0z" fill="#7895b8" stroke="#31465f" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M358 248h184M337 301h226" stroke="#e7b84d" stroke-width="12" stroke-linecap="round" opacity=".65"/>
+  <path d="M643 332c44 38 53 91 24 134" fill="none" stroke="#7b8faa" stroke-width="14" stroke-linecap="round"/>
+</svg>

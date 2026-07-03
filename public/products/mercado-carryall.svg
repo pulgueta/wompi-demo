@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 620" role="img" aria-labelledby="title desc">
+  <title id="title">Mercado Carryall</title>
+  <desc id="desc">A product-style illustration of a waxed canvas tote bag.</desc>
+  <rect width="900" height="620" fill="#f7f7f4"/>
+  <rect x="86" y="72" width="728" height="476" rx="28" fill="#eee8da"/>
+  <circle cx="202" cy="166" r="78" fill="#be8b5f" opacity=".28"/>
+  <path d="M291 250h318l-34 236H325z" fill="#c8945e" stroke="#55381f" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M343 255c10-88 58-130 107-130s97 42 107 130" fill="none" stroke="#55381f" stroke-width="18" stroke-linecap="round"/>
+  <path d="M343 255c8-48 45-78 107-78s99 30 107 78" fill="none" stroke="#f0c88c" stroke-width="10" stroke-linecap="round"/>
+  <path d="M331 319h238M322 381h256" stroke="#8a5f38" stroke-width="12" opacity=".55"/>
+  <rect x="408" y="334" width="86" height="72" rx="14" fill="#f0c88c"/>
+  <path d="M420 371h62" stroke="#55381f" stroke-width="10" stroke-linecap="round"/>
+</svg>
