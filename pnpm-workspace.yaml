@@ -1,4 +1,7 @@
 allowBuilds:
+  bufferutil: true
+  core-js: true
   unrs-resolver: true
+  utf-8-validate: true
 minimumReleaseAgeExclude:
   - vite@8.1.3
