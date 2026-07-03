@@ -3,7 +3,8 @@ import { Show, SignInButton } from "@clerk/tanstack-react-start"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { CheckoutResult } from "./ecommerce.server"
-import { formatCurrency, type CartItem } from "./storefront-types"
+import { formatCurrency } from "./storefront-types"
+import type { CartItem } from "./storefront-types"
 
 export function CheckoutPanel({
   cartItems,

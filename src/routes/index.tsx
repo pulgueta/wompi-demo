@@ -15,7 +15,6 @@ import type {
 } from "@/features/store/ecommerce.server"
 import { ProductGrid } from "@/features/store/product-grid"
 import { RecentOrders } from "@/features/store/recent-orders"
-import type { CartItem } from "@/features/store/storefront-types"
 
 export const Route = createFileRoute("/")({
   loader: () => getStorefront(),
@@ -199,20 +198,5 @@ function storefrontReducer(
       return { ...state, checkoutResult: action.result }
     case "checkoutError":
       return { ...state, checkoutError: action.message }
-  }
-}
-
-function formatCurrency(amountInCents: number) {
-  return currencyFormatter.format(amountInCents / 100)
-}
-
-function statusLabel(status: CheckoutResult["status"]) {
-  switch (status) {
-    case "configuration_error":
-      return "needs Wompi keys"
-    case "payment_link_created":
-      return "ready for payment"
-    case "pending":
-      return "pending"
   }
 }

@@ -237,10 +237,10 @@ async function getCurrentUser(): Promise<StoreUser | null> {
     clerkUser.primaryEmailAddress?.emailAddress ??
     clerkUser.emailAddresses.at(0)?.emailAddress ??
     `${session.userId}@example.invalid`
-  const name =
-    clerkUser.fullName ??
-    [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ") ??
-    "Demo customer"
+  const nameFromParts = [clerkUser.firstName, clerkUser.lastName]
+    .filter(Boolean)
+    .join(" ")
+  const name = (clerkUser.fullName ?? nameFromParts) || "Demo customer"
   const now = Date.now()
 
   if (existingUser) {
