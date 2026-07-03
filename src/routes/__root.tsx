@@ -9,6 +9,7 @@ import {
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools"
 import { TanStackDevtools } from "@tanstack/react-devtools"
 
+import { CartProvider } from "@/features/store/cart-context"
 import appCss from "../styles.css?url"
 
 type RouterContext = {
@@ -52,7 +53,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        <ClerkProvider appearance={{ theme: shadcn }}>{children}</ClerkProvider>
+        <ClerkProvider appearance={{ theme: shadcn }}>
+          <CartProvider>{children}</CartProvider>
+        </ClerkProvider>
         <TanStackDevtools
           config={{
             position: "bottom-right",

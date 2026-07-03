@@ -24,7 +24,7 @@ const mockProducts = [
     slug: "cafetera-andina-kit",
     name: "Cafetera Andina Kit",
     description:
-      "A compact pour-over set with filters, glass server, and Colombian roast notes.",
+      "Set compacto para preparar café filtrado con jarra de vidrio, filtros y notas de tueste colombiano.",
     imagePath: "/products/cafetera-andina.svg",
     priceInCents: 129_000_00,
     inventory: 18,
@@ -34,7 +34,7 @@ const mockProducts = [
     slug: "mercado-carryall",
     name: "Mercado Carryall",
     description:
-      "Waxed canvas tote with reinforced handles for errands, office days, and weekend markets.",
+      "Bolso de lona encerada con cargaderas reforzadas para diligencias, oficina y mercado de fin de semana.",
     imagePath: "/products/mercado-carryall.svg",
     priceInCents: 179_000_00,
     inventory: 24,
@@ -44,7 +44,7 @@ const mockProducts = [
     slug: "calima-desk-lamp",
     name: "Calima Desk Lamp",
     description:
-      "A warm dimmable lamp with a weighted ceramic base and woven shade.",
+      "Lámpara cálida regulable con base cerámica pesada y pantalla tejida para escritorio o mesa de noche.",
     imagePath: "/products/calima-lamp.svg",
     priceInCents: 219_000_00,
     inventory: 9,
@@ -105,8 +105,17 @@ async function bootstrapDatabase() {
       currency TEXT NOT NULL DEFAULT 'COP',
       customer_email TEXT NOT NULL,
       customer_name TEXT NOT NULL,
+      customer_phone TEXT,
+      legal_id_type TEXT,
+      legal_id TEXT,
+      shipping_address_line_1 TEXT,
+      shipping_address_line_2 TEXT,
+      shipping_city TEXT,
+      shipping_region TEXT,
+      shipping_postal_code TEXT,
       wompi_reference TEXT NOT NULL UNIQUE,
-      wompi_payment_link_id TEXT,
+      wompi_transaction_id TEXT,
+      wompi_payment_method_type TEXT,
       wompi_checkout_url TEXT,
       wompi_error TEXT,
       created_at INTEGER NOT NULL,
@@ -120,6 +129,57 @@ async function bootstrapDatabase() {
   await db.run(sql`
     CREATE INDEX IF NOT EXISTS orders_wompi_reference_idx
     ON orders (wompi_reference)
+  `)
+  await addColumnIfMissing("orders", "wompi_transaction_id", "TEXT")
+  await addColumnIfMissing("orders", "wompi_payment_method_type", "TEXT")
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS checkout_sessions (
+      id TEXT PRIMARY KEY NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount_in_cents INTEGER NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'COP',
+      customer_email TEXT NOT NULL,
+      customer_name TEXT NOT NULL,
+      customer_phone TEXT,
+      legal_id_type TEXT,
+      legal_id TEXT,
+      shipping_address_line_1 TEXT,
+      shipping_address_line_2 TEXT,
+      shipping_city TEXT,
+      shipping_region TEXT,
+      shipping_postal_code TEXT,
+      wompi_reference TEXT NOT NULL UNIQUE,
+      wompi_checkout_url TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `)
+  await db.run(sql`
+    CREATE INDEX IF NOT EXISTS checkout_sessions_user_id_idx
+    ON checkout_sessions (user_id)
+  `)
+  await db.run(sql`
+    CREATE INDEX IF NOT EXISTS checkout_sessions_wompi_reference_idx
+    ON checkout_sessions (wompi_reference)
+  `)
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS checkout_session_items (
+      id TEXT PRIMARY KEY NOT NULL,
+      checkout_session_id TEXT NOT NULL REFERENCES checkout_sessions(id) ON DELETE CASCADE,
+      product_id TEXT NOT NULL REFERENCES products(id),
+      product_name TEXT NOT NULL,
+      unit_price_in_cents INTEGER NOT NULL,
+      quantity INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `)
+  await db.run(sql`
+    CREATE INDEX IF NOT EXISTS checkout_session_items_session_id_idx
+    ON checkout_session_items (checkout_session_id)
+  `)
+  await db.run(sql`
+    CREATE INDEX IF NOT EXISTS checkout_session_items_product_id_idx
+    ON checkout_session_items (product_id)
   `)
   await db.run(sql`
     CREATE TABLE IF NOT EXISTS order_items (
@@ -142,14 +202,41 @@ async function bootstrapDatabase() {
   `)
 
   const now = Date.now()
-  await db
-    .insert(products)
-    .values(
-      mockProducts.map((product) => ({
+  for (const product of mockProducts) {
+    await db
+      .insert(products)
+      .values({
         ...product,
         createdAt: now,
         updatedAt: now,
-      }))
+      })
+      .onConflictDoUpdate({
+        target: products.id,
+        set: {
+          slug: product.slug,
+          name: product.name,
+          description: product.description,
+          imagePath: product.imagePath,
+          priceInCents: product.priceInCents,
+          inventory: product.inventory,
+          active: true,
+          updatedAt: now,
+        },
+      })
+  }
+}
+
+async function addColumnIfMissing(
+  tableName: string,
+  columnName: string,
+  definition: string
+) {
+  const tableInfo = await client.execute(`PRAGMA table_info(${tableName})`)
+  const hasColumn = tableInfo.rows.some((row) => row.name === columnName)
+
+  if (!hasColumn) {
+    await client.execute(
+      `ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`
     )
-    .onConflictDoNothing()
+  }
 }

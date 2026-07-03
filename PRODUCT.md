@@ -10,7 +10,7 @@ Developers evaluating `@pulgueta/wompi` in a realistic TanStack Start applicatio
 
 ## Product Purpose
 
-Show how to integrate Wompi payments into a full-stack React app backed by Turso SQLite and Drizzle. Success means a developer can read the code, run the storefront with mock products, sign in, create an order, and see where Wompi payment-link metadata is produced and stored.
+Show how to integrate Wompi payments into a full-stack React app backed by Turso SQLite and Drizzle. Success means a developer can read the code, run the storefront with mock products, sign in, create an order, and see where the signed Wompi checkout URL is produced and stored.
 
 ## Brand Personality
 

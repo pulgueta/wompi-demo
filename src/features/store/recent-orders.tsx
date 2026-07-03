@@ -1,20 +1,21 @@
-import type { CheckoutResult, RecentOrder } from "./ecommerce.server"
+import type { Order } from "@/db/schema"
+import type { RecentOrder } from "./ecommerce.server"
 import { formatCurrency } from "./storefront-types"
 
 export function RecentOrders({ orders }: { orders: RecentOrder[] }) {
   return (
     <section className="rounded-xl border bg-card p-5">
       <div className="space-y-1">
-        <h2 className="text-lg font-semibold">Recent orders</h2>
+        <h2 className="text-lg font-semibold">Pedidos</h2>
         <p className="text-sm text-muted-foreground">
-          Loaded through the same server function as the catalog.
+          Solo aparecen cuando Wompi confirma una transacción por webhook.
         </p>
       </div>
 
       <div className="mt-4 space-y-4">
         {orders.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Sign in and create an order to see persisted Wompi metadata.
+            Todavía no hay transacciones confirmadas por webhook.
           </p>
         ) : (
           orders.map((order) => (
@@ -43,15 +44,10 @@ export function RecentOrders({ orders }: { orders: RecentOrder[] }) {
                   </li>
                 ))}
               </ul>
-              {order.wompiCheckoutUrl ? (
-                <a
-                  href={order.wompiCheckoutUrl}
-                  className="text-sm font-medium text-primary underline-offset-4 hover:underline"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Reopen checkout
-                </a>
+              {order.wompiTransactionId ? (
+                <p className="text-xs break-all text-muted-foreground">
+                  Wompi transaction: {order.wompiTransactionId}
+                </p>
               ) : null}
               {order.wompiError ? (
                 <p className="text-xs text-destructive">{order.wompiError}</p>
@@ -64,13 +60,17 @@ export function RecentOrders({ orders }: { orders: RecentOrder[] }) {
   )
 }
 
-function statusLabel(status: CheckoutResult["status"]) {
+function statusLabel(status: Order["status"]) {
   switch (status) {
-    case "configuration_error":
-      return "needs Wompi keys"
-    case "payment_link_created":
-      return "ready for payment"
+    case "approved":
+      return "aprobado"
+    case "declined":
+      return "rechazado"
+    case "error":
+      return "error"
     case "pending":
-      return "pending"
+      return "pendiente"
+    case "voided":
+      return "anulado"
   }
 }

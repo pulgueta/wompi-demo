@@ -1,12 +1,22 @@
 import { randomUUID } from "node:crypto"
 
 import { auth, clerkClient } from "@clerk/tanstack-react-start/server"
-import { WompiClient } from "@pulgueta/wompi"
-import { getSignatureKey } from "@pulgueta/wompi/server"
+import {
+  buildCheckoutUrl,
+  isTransactionUpdatedEvent,
+  verifyWebhookEvent,
+} from "@pulgueta/wompi/server"
 import { desc, eq, inArray } from "drizzle-orm"
 
 import { db, ensureDatabaseReady } from "@/db/client.server"
-import { orderItems, orders, products, users } from "@/db/schema"
+import {
+  checkoutSessionItems,
+  checkoutSessions,
+  orderItems,
+  orders,
+  products,
+  users,
+} from "@/db/schema"
 import type { Order, OrderItem, Product, User } from "@/db/schema"
 
 export type StoreUser = Pick<User, "id" | "email" | "name">
@@ -19,18 +29,25 @@ export type RecentOrder = Pick<
   | "status"
   | "wompiCheckoutUrl"
   | "wompiError"
-  | "wompiPaymentLinkId"
   | "wompiReference"
+  | "wompiTransactionId"
   | "createdAt"
 > & {
   items: Array<Pick<OrderItem, "productName" | "quantity" | "unitPriceInCents">>
 }
 
 export type StorefrontData = {
-  currentUser: StoreUser | null
   products: Product[]
-  recentOrders: RecentOrder[]
   wompiConfigured: boolean
+}
+
+export type CheckoutData = StorefrontData & {
+  currentUser: StoreUser | null
+}
+
+export type OrderHistoryData = {
+  currentUser: StoreUser | null
+  orders: RecentOrder[]
 }
 
 type CheckoutItem = {
@@ -41,31 +58,61 @@ type CheckoutItem = {
 type CreateCheckoutInput = {
   customerName: string
   customerEmail: string
+  customerPhone: string
+  legalIdType: "CC" | "CE" | "NIT" | "PP" | "TI"
+  legalId: string
+  shippingAddressLine1: string
+  shippingAddressLine2?: string
+  shippingCity: string
+  shippingRegion: string
+  shippingPostalCode?: string
   items: CheckoutItem[]
   redirectUrl: string
 }
 
 export type CheckoutResult = {
-  orderId: string
   checkoutUrl: string | null
+  reference: string | null
   message: string
-  status: Order["status"]
 }
+
+type WompiTransactionStatus =
+  "PENDING" | "APPROVED" | "DECLINED" | "ERROR" | "VOIDED"
 
 export async function getStorefrontData(): Promise<StorefrontData> {
   await ensureDatabaseReady()
 
-  const currentUser = await getCurrentUser()
-  const [storeProducts, recentOrders] = await Promise.all([
+  const storeProducts = await listProducts()
+
+  return {
+    products: storeProducts,
+    wompiConfigured: isWompiConfigured(),
+  }
+}
+
+export async function getCheckoutData(): Promise<CheckoutData> {
+  await ensureDatabaseReady()
+
+  const [currentUser, storeProducts] = await Promise.all([
+    getCurrentUser(),
     listProducts(),
-    currentUser ? listRecentOrders(currentUser.id) : Promise.resolve([]),
   ])
 
   return {
     currentUser,
     products: storeProducts,
-    recentOrders,
     wompiConfigured: isWompiConfigured(),
+  }
+}
+
+export async function getOrderHistoryData(): Promise<OrderHistoryData> {
+  await ensureDatabaseReady()
+
+  const currentUser = await getCurrentUser()
+
+  return {
+    currentUser,
+    orders: currentUser ? await listRecentOrders(currentUser.id) : [],
   }
 }
 
@@ -121,104 +168,225 @@ export async function createCheckout(
     (total, line) => total + line.lineTotal,
     0
   )
-  const now = Date.now()
-  const orderId = randomUUID()
-  const wompiReference = `wompi-demo-${orderId}`
+  const wompiConfiguration = getWompiCheckoutConfiguration()
+  if (!wompiConfiguration.ok) {
+    return {
+      checkoutUrl: null,
+      reference: null,
+      message: wompiConfiguration.message,
+    }
+  }
 
+  const now = Date.now()
+  const checkoutSessionId = randomUUID()
+  const wompiReference = `wompi-demo-${checkoutSessionId}`
+
+  try {
+    const checkoutUrl = await buildCheckoutUrl({
+      publicKey: wompiConfiguration.publicKey,
+      integrityKey: wompiConfiguration.integrityKey,
+      reference: wompiReference,
+      amountInCents,
+      currency: "COP",
+      redirectUrl: input.redirectUrl,
+      collectShipping: true,
+      customerData: {
+        email: input.customerEmail,
+        fullName: input.customerName,
+        phoneNumber: input.customerPhone,
+        phoneNumberPrefix: "+57",
+        legalId: input.legalId,
+        legalIdType: input.legalIdType,
+      },
+    })
+
+    await db.insert(checkoutSessions).values({
+      id: checkoutSessionId,
+      userId: currentUser.id,
+      amountInCents,
+      currency: "COP",
+      customerEmail: input.customerEmail,
+      customerName: input.customerName,
+      customerPhone: input.customerPhone,
+      legalIdType: input.legalIdType,
+      legalId: input.legalId,
+      shippingAddressLine1: input.shippingAddressLine1,
+      shippingAddressLine2: input.shippingAddressLine2 ?? null,
+      shippingCity: input.shippingCity,
+      shippingRegion: input.shippingRegion,
+      shippingPostalCode: input.shippingPostalCode ?? null,
+      wompiReference,
+      wompiCheckoutUrl: checkoutUrl,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    await db.insert(checkoutSessionItems).values(
+      orderLines.map((line) => ({
+        id: randomUUID(),
+        checkoutSessionId,
+        productId: line.product.id,
+        productName: line.product.name,
+        unitPriceInCents: line.product.priceInCents,
+        quantity: line.quantity,
+        createdAt: now,
+      }))
+    )
+
+    return {
+      checkoutUrl,
+      reference: wompiReference,
+      message: "Checkout created. Redirecting to Wompi.",
+    }
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to create checkout."
+    return {
+      checkoutUrl: null,
+      reference: wompiReference,
+      message,
+    }
+  }
+}
+
+export async function processWompiWebhook(rawBody: string) {
+  await ensureDatabaseReady()
+
+  const eventsKey = process.env.WOMPI_EVENTS_KEY
+  if (!eventsKey) {
+    return {
+      ok: false,
+      status: 500,
+      message: "Set WOMPI_EVENTS_KEY to verify Wompi webhook events.",
+    }
+  }
+
+  const [error, event] = await verifyWebhookEvent(rawBody, { eventsKey })
+  if (error) {
+    return {
+      ok: false,
+      status: 403,
+      message: error.message,
+    }
+  }
+
+  if (!isTransactionUpdatedEvent(event)) {
+    return {
+      ok: true,
+      status: 200,
+      message: "Ignored unsupported Wompi event.",
+    }
+  }
+
+  const transaction = event.data.transaction
+  const status = mapWompiStatus(transaction.status)
+  const now = Date.now()
+  const existingOrder = await db.query.orders.findFirst({
+    where: eq(orders.wompiReference, transaction.reference),
+  })
+
+  if (existingOrder) {
+    await db
+      .update(orders)
+      .set({
+        status,
+        amountInCents:
+          transaction.amount_in_cents ?? existingOrder.amountInCents,
+        customerEmail:
+          transaction.customer_email ?? existingOrder.customerEmail,
+        currency: transaction.currency ?? existingOrder.currency,
+        wompiError: transaction.status_message ?? null,
+        wompiPaymentMethodType:
+          transaction.payment_method_type ??
+          existingOrder.wompiPaymentMethodType,
+        wompiTransactionId: transaction.id,
+        updatedAt: now,
+      })
+      .where(eq(orders.id, existingOrder.id))
+
+    return {
+      ok: true,
+      status: 200,
+      message: "Order status updated.",
+    }
+  }
+
+  const checkoutSession = await db.query.checkoutSessions.findFirst({
+    where: eq(checkoutSessions.wompiReference, transaction.reference),
+    with: {
+      items: {
+        columns: {
+          productId: true,
+          productName: true,
+          quantity: true,
+          unitPriceInCents: true,
+        },
+      },
+    },
+  })
+
+  if (!checkoutSession) {
+    return {
+      ok: true,
+      status: 200,
+      message: "No matching checkout session found.",
+    }
+  }
+
+  const orderId = randomUUID()
   await db.insert(orders).values({
     id: orderId,
-    userId: currentUser.id,
-    status: "pending",
-    amountInCents,
-    currency: "COP",
-    customerEmail: input.customerEmail,
-    customerName: input.customerName,
-    wompiReference,
+    userId: checkoutSession.userId,
+    status,
+    amountInCents: transaction.amount_in_cents ?? checkoutSession.amountInCents,
+    currency: transaction.currency ?? "COP",
+    customerEmail: transaction.customer_email ?? checkoutSession.customerEmail,
+    customerName: checkoutSession.customerName,
+    customerPhone: checkoutSession.customerPhone,
+    legalIdType: checkoutSession.legalIdType,
+    legalId: checkoutSession.legalId,
+    shippingAddressLine1:
+      transaction.shipping_address?.address_line_1 ??
+      checkoutSession.shippingAddressLine1,
+    shippingAddressLine2:
+      transaction.shipping_address?.address_line_2 ??
+      checkoutSession.shippingAddressLine2,
+    shippingCity:
+      transaction.shipping_address?.city ?? checkoutSession.shippingCity,
+    shippingRegion:
+      transaction.shipping_address?.region ?? checkoutSession.shippingRegion,
+    shippingPostalCode:
+      transaction.shipping_address?.postal_code ??
+      checkoutSession.shippingPostalCode,
+    wompiReference: transaction.reference,
+    wompiCheckoutUrl: checkoutSession.wompiCheckoutUrl,
+    wompiError: transaction.status_message ?? null,
+    wompiPaymentMethodType: transaction.payment_method_type ?? null,
+    wompiTransactionId: transaction.id,
     createdAt: now,
     updatedAt: now,
   })
 
   await db.insert(orderItems).values(
-    orderLines.map((line) => ({
+    checkoutSession.items.map((item) => ({
       id: randomUUID(),
       orderId,
-      productId: line.product.id,
-      productName: line.product.name,
-      unitPriceInCents: line.product.priceInCents,
-      quantity: line.quantity,
+      productId: item.productId,
+      productName: item.productName,
+      unitPriceInCents: item.unitPriceInCents,
+      quantity: item.quantity,
       createdAt: now,
     }))
   )
 
-  const wompi = createWompiClient()
-  if (!wompi.ok) {
-    await markOrderConfigurationError(orderId, wompi.message)
-    return {
-      orderId,
-      checkoutUrl: null,
-      message: wompi.message,
-      status: "configuration_error",
-    }
-  }
-
-  const integrityKey = process.env.WOMPI_INTEGRITY_KEY
-  const signature = integrityKey
-    ? await getSignatureKey({
-        reference: wompiReference,
-        amountInCents,
-        integrityKey,
-      })
-    : undefined
-
-  const [error, paymentLink] =
-    await wompi.client.paymentLinks.createPaymentLink({
-      name: `Order ${orderId.slice(0, 8)}`,
-      description: orderLines
-        .map((line) => `${line.quantity} x ${line.product.name}`)
-        .join(", "),
-      single_use: true,
-      collect_shipping: false,
-      collect_customer_legal_id: false,
-      amount_in_cents: amountInCents,
-      currency: "COP",
-      reference: wompiReference,
-      signature,
-      redirect_url: input.redirectUrl,
-      customer_data: {
-        customer_references: [
-          {
-            label: "Order reference",
-            is_required: false,
-          },
-        ],
-      },
-    })
-
-  if (error) {
-    await markOrderConfigurationError(orderId, error.message)
-    return {
-      orderId,
-      checkoutUrl: null,
-      message: error.message,
-      status: "configuration_error",
-    }
-  }
-
   await db
-    .update(orders)
-    .set({
-      status: "payment_link_created",
-      wompiPaymentLinkId: paymentLink.id,
-      wompiCheckoutUrl: paymentLink.checkout_url ?? null,
-      updatedAt: Date.now(),
-    })
-    .where(eq(orders.id, orderId))
+    .delete(checkoutSessions)
+    .where(eq(checkoutSessions.id, checkoutSession.id))
 
   return {
-    orderId,
-    checkoutUrl: paymentLink.checkout_url ?? null,
-    message: "Wompi payment link created.",
-    status: "payment_link_created",
+    ok: true,
+    status: 200,
+    message: "Order created from webhook.",
   }
 }
 
@@ -277,7 +445,6 @@ async function listRecentOrders(userId: string): Promise<RecentOrder[]> {
   const storeOrders = await db.query.orders.findMany({
     where: eq(orders.userId, userId),
     orderBy: desc(orders.createdAt),
-    limit: 4,
     with: {
       items: {
         columns: {
@@ -296,47 +463,51 @@ async function listRecentOrders(userId: string): Promise<RecentOrder[]> {
     status: order.status,
     wompiCheckoutUrl: order.wompiCheckoutUrl,
     wompiError: order.wompiError,
-    wompiPaymentLinkId: order.wompiPaymentLinkId,
     wompiReference: order.wompiReference,
+    wompiTransactionId: order.wompiTransactionId,
     createdAt: order.createdAt,
     items: order.items,
   }))
 }
 
-function createWompiClient():
-  { ok: true; client: WompiClient } | { ok: false; message: string } {
+function getWompiCheckoutConfiguration():
+  | { ok: true; publicKey: string; integrityKey: string }
+  | { ok: false; message: string } {
   const publicKey = process.env.WOMPI_PUBLIC_KEY
-  const privateKey = process.env.WOMPI_PRIVATE_KEY
+  const integrityKey = process.env.WOMPI_INTEGRITY_KEY
 
-  if (!publicKey || !privateKey) {
+  if (!publicKey || !integrityKey) {
     return {
       ok: false,
       message:
-        "Set WOMPI_PUBLIC_KEY and WOMPI_PRIVATE_KEY to create hosted payment links.",
+        "Set WOMPI_PUBLIC_KEY and WOMPI_INTEGRITY_KEY to redirect customers to Wompi checkout.",
     }
   }
 
   return {
     ok: true,
-    client: new WompiClient({
-      publicKey,
-      privateKey,
-      sandbox: process.env.WOMPI_SANDBOX !== "false",
-    }),
+    publicKey,
+    integrityKey,
   }
 }
 
 function isWompiConfigured() {
-  return Boolean(process.env.WOMPI_PUBLIC_KEY && process.env.WOMPI_PRIVATE_KEY)
+  return Boolean(
+    process.env.WOMPI_PUBLIC_KEY && process.env.WOMPI_INTEGRITY_KEY
+  )
 }
 
-async function markOrderConfigurationError(orderId: string, message: string) {
-  await db
-    .update(orders)
-    .set({
-      status: "configuration_error",
-      wompiError: message,
-      updatedAt: Date.now(),
-    })
-    .where(eq(orders.id, orderId))
+function mapWompiStatus(status: WompiTransactionStatus): Order["status"] {
+  switch (status) {
+    case "APPROVED":
+      return "approved"
+    case "DECLINED":
+      return "declined"
+    case "ERROR":
+      return "error"
+    case "VOIDED":
+      return "voided"
+    case "PENDING":
+      return "pending"
+  }
 }

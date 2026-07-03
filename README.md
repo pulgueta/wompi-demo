@@ -3,9 +3,10 @@
 This is a small TanStack Start ecommerce application that demonstrates
 `@pulgueta/wompi` with Clerk auth, Turso/libSQL SQLite, and Drizzle ORM.
 
-The app seeds a few mock products, lets a signed-in user create an order, stores
-the order and line items in SQLite, then uses Wompi to create a hosted payment
-link.
+The app seeds a few mock products, lets a signed-in user prepare a Wompi Web
+Checkout URL, and redirects the customer to pay. Orders are created from signed
+Wompi webhook events, so abandoned checkout redirects do not appear in order
+history.
 
 ## Environment
 
@@ -17,23 +18,21 @@ TURSO_DATABASE_URL="libsql://..."
 TURSO_AUTH_TOKEN="..."
 ```
 
-To create live Wompi payment links, set:
+To redirect customers to Wompi Web Checkout, set:
 
 ```bash
 WOMPI_PUBLIC_KEY="pub_test_..."
-WOMPI_PRIVATE_KEY="prv_test_..."
-WOMPI_INTEGRITY_KEY="test_integrity_..." # optional for payment links
-WOMPI_SANDBOX="true"
+WOMPI_INTEGRITY_KEY="test_integrity_..."
+WOMPI_EVENTS_KEY="test_events_..."
 ```
 
-The checkout server function handles missing Wompi keys by still persisting the
-order with a configuration status, which keeps the demo inspectable.
+`WOMPI_INTEGRITY_KEY` signs the checkout URL. `WOMPI_EVENTS_KEY` verifies the
+`/api/wompi-webhook` endpoint before creating or updating an order.
 
 ## Database
 
-The production-like Drizzle schema lives in `src/db/schema.ts`; the initial SQL
-migration lives in `drizzle/0000_initial_ecommerce.sql`; and `drizzle.config.ts`
-is configured for Turso/libSQL.
+The production-like Drizzle schema lives in `src/db/schema.ts`; SQL migrations
+live in `drizzle/`; and `drizzle.config.ts` is configured for Turso/libSQL.
 
 ## Adding components
 
